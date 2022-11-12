@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<head>
+	<title>Wikipedia Lapser</title>
+	<meta charset="utf-8" />
+	<link rel="stylesheet" href="style.css" />
+	<link rel="stylesheet" href="wpCSS1.css" />
+	<link rel="stylesheet" href="wpCSS2.css" />
+</head>
+<body>
+	<h1>Wikipedia Lapser</h1>
+	<p>Wikipedia revision timelapse visualizer</p>
+	<div id="settingsDiv">
+		<form id="baseForm">
+			<h3>Base settings</h3>
+			Page: <input type="text" name="page" required/><br>
+			Between: <input type="date" name="start" required/> - <input type="date" name="end" required/><br>
+			Interval (seconds): <input type="number" name="interval" min="0" required /><br>
+			Allow animation play at <select name="callbackMode">
+				<option value="to">x downloaded frames to completion</option>
+				<option value="from">x frames downloaded</option>
+				<option value="perc" selected>x% done</option>
+			</select>:
+			<input type="number" name="callbackFrame" value="85" min="0" required><br>
+			<button type="submit" id="baseFormSubmit">Download</button>
+		</form>
+		<form id="animForm">
+			<h3>Animation settings</h3>
+			Animation delay (ms): <input type="number" id="animDelay" min="0" required><br>
+			<button type="submit" id="animFormSubmit" disabled>Run</button> <button type="button" id="animClear">Clear</button>
+		</form>
+	</div>
+	<div id="statusBar">
+		<div id="readProcess" class="reading">
+			Downloaded and Processed: <span id="processed"></span><br>
+			Frame: <span id="frame"></span><br>
+			Date: <span id="time"></span><br>
+		</div>
+		<div id="zoomDiv">
+			<form id="zoomInput">Zoom%: <input type="number" id="animZoom" value="100"></form>
+		</div>
+	</div>
+	<div id="wpContent">
+	</div>
+	<script src="script.js"></script>
+</body>

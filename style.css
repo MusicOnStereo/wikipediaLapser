@@ -1,0 +1,37 @@
+body {
+	height: auto !important;
+	padding: 8px 8px;
+}
+
+
+.reading {
+	background-color: #404040;
+	color: white;
+	font-family: courier;
+	padding: 3px;
+
+}
+
+#statusBar {
+	position: sticky;
+	overflow: initial !important;
+	top: 0;
+	z-index: 1;
+	background-color: #000000A0;
+	color: white;
+	font-size: 13px;
+}
+
+#zoomDiv {
+	padding: 1px 3px;
+}
+
+#settingsDiv {
+	padding-bottom: 4px;
+}
+#wpContent {
+	display: block;
+	transform-origin: top left;
+	scale: 100%;
+	z-index: 0;
+}
