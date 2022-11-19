@@ -1,3 +1,4 @@
+
 const api = "https://en.wikipedia.org/w/api.php?format=json&origin=*&formatversion=2&";
 let pages = [];
 
@@ -13,8 +14,12 @@ const elementBaseFormSubmit = document.getElementById("baseFormSubmit");
 const elementAnimForm = document.getElementById("animForm");
 const elementAnimFormSubmit = document.getElementById("animFormSubmit");
 const elementAnimClear = document.getElementById("animClear");
+const elementFetchInput = document.getElementById("fetchMethod");
+const elementCBFrameInput = document.getElementById("callbackFrame");
+const elementCBModeInput = document.getElementById("callbackMode")
 
-let revTotal = 0;
+let revTotal = 10;
+let treeDepth = 4;
 let animationPlaying = false;
 
 // Fetch page revision of title from certain timestamp
@@ -26,7 +31,6 @@ async function getPageRevisionOn(title, timestamp) {
 		throw Error("Request error: " + response.statusText);
 	}
 	let resJSON = await response.json();
-	console.log(resJSON);
 
 	if (!resJSON.query.pages[0].hasOwnProperty("revisions")) {
 		return {errCode: -1};
@@ -53,20 +57,11 @@ async function getOldPageJSON(oldID) {
 	return resJSON.parse.text;
 }
 
-// Zero pad a numeric string
-function zeroFill(value, length) {
-	value = value.toString();
-	while (value.length < length) {
-		value = "0" + value;
-	}
-	return value;
-}
-
 // Convert Date object to wikipedia timestamp
 function dateToTimestamp(date) {
 	return ( // Format: YYYYMMDDhhmmss
 		zeroFill(date.getUTCFullYear(), 4) +
-		zeroFill(date.getUTCMonth(), 2) +
+		zeroFill(date.getUTCMonth() + 1, 2) +
 		zeroFill(date.getUTCDate(), 2) +
 		zeroFill(date.getUTCHours(), 2) +
 		zeroFill(date.getUTCMinutes(), 2) +
@@ -74,14 +69,16 @@ function dateToTimestamp(date) {
 	);
 }
 
-// Fetch a range of revisions and push to pages array
-async function getPagesRange(title, start, end, interval, callbackIndex, callback, everyLoop) {
-	let date = new Date(start); 
-	let pageIndex = 0;
-	pages = [];
-	// Calculate amount of revisions to be evaluated
-	revTotal = Math.floor((end - start) / (interval));
-	// Check callbackIndex mode (range)
+// Zero pad a numeric string
+function zeroFill(value, length, base = 10) {
+	value = value.toString(base);
+	while (value.length < length) {
+		value = "0" + value;
+	}
+	return value;
+}
+
+function parseCallbackIndex(callbackIndex) {
 	if (callbackIndex <= 1 && callbackIndex >= 0) {
 		callbackIndex = (revTotal - 1) * callbackIndex;
 	} else if (callbackIndex < 0) {
@@ -94,42 +91,163 @@ async function getPagesRange(title, start, end, interval, callbackIndex, callbac
 	} else {
 		callbackIndex -= 1;
 	}
-	console.log(callbackIndex);
 	callbackIndex = Math.ceil(callbackIndex);
-	for (pageIndex = 0; pageIndex < revTotal; pageIndex++) {
-		everyLoop(pageIndex, date);
+	return callbackIndex;
+}
+
+// Fetch a range of revisions and push to pages array
+async function getRangeLinear(title, start, end, interval, callbackIndex, callback, everyLoop) {
+	let date = new Date(start); 
+	let pageIndex = 0;
+	pages = [];
+	// Calculate amount of revisions to be evaluated
+	revTotal = Math.floor((end - start) / (interval));
+	// Check callbackIndex mode (range)
+	
+	let timestamp = dateToTimestamp(date);
+	let pageRevID = await getPageRevisionOn(title, timestamp);
+	let pageText = await getOldPageJSON(pageRevID);
+	let currentPage = {page: pageText, id: pageRevID, date: [new Date(date.valueOf())], count: 1};
+	everyLoop(pageIndex, date);
+	date = new Date(start + interval);
+	
+	callbackIndex = parseCallbackIndex(callbackIndex)
+	for (pageIndex = 1; pageIndex < revTotal; pageIndex++) {
 		if (pageIndex === callbackIndex) {
 			callback();
 		}
 		console.log(pageIndex);
-		let timestamp = dateToTimestamp(date);
+		timestamp = dateToTimestamp(date);
+		
 		// "Don't DoS us"  - Wikipedia
 		// Subsequent requests to prevent rate limiting
-		let pageText = await getOldPageJSON(await getPageRevisionOn(title, timestamp));
+		pageRevID = await getPageRevisionOn(title, timestamp);
 		date = new Date(date.valueOf() + interval);
-		pages.push({page: pageText, date: date});
+
+		// Push current page
+		if (currentPage.id !== pageRevID && pageRevID.errCode !== -1) {
+			pageText = await getOldPageJSON(pageRevID);
+			pages.push(currentPage);
+			currentPage = {page: pageText, id: pageRevID, date: [new Date(date.valueOf())], count: 1}
+		} else {
+			currentPage.date.push(new Date(date.valueOf()))
+			currentPage.count++;
+		}
+		everyLoop(pageIndex, date);
 	}
+	pages.push(currentPage);
 	if (pageIndex < callbackIndex) {
 		callback();
 	}
 }
 
+function bitToArray(value) {
+	let array = [];
+	for (let i = treeDepth - 1; i >= 0; i--) {
+		array.push((value >> i) & 1);
+	}
+	return array;
+}
+
+function buildTree() {
+	let tree = {children: []};
+	for (let i = 0; i < revTotal; i++) {
+		let bitArray = bitToArray(i);
+		let treeNode = tree;
+		for (let a = 0; a < treeDepth; a++) {
+			let path = bitArray[a];
+			if (a === (treeDepth - 1)) {
+				treeNode.children.push(false);
+				break;
+			} else if (path >= treeNode.children.length) {
+				treeNode.children.push({children: []});
+			}
+			treeNode = treeNode.children[path];
+		}
+	}
+	return tree;
+}
+
+// Fetch a range of revisions using a binary tree
+async function getRangeTree(title, start, end, interval, everyLoop) {
+	revTotal = Math.floor((end - start) / (interval));
+	treeDepth = Math.ceil(Math.log2(revTotal));
+	console.log("treeDepth " + treeDepth)
+	let date = start;
+	let blockEnd;
+	let tree = buildTree();
+	let id;
+	let index = 0;
+	let totalReq = 0;
+	while (index < revTotal) { 
+		id = await getPageRevisionOn(title, dateToTimestamp(new Date(date)));
+		let treeNode = tree;
+		let treeNodeInt = 0;
+		for (let i = treeDepth - 1; i >= 0; i--) {
+			let childNode;
+			if (treeNode.children.length === 1) {
+				childNode = 0; 
+			} else {
+				let halfIndex = treeNodeInt | (1 << i);
+				if (!treeNode.hasOwnProperty("date")) {
+					treeNode.date = start + (interval * halfIndex);
+					treeNode.id = await getPageRevisionOn(title, dateToTimestamp(new Date(treeNode.date)));
+					totalReq++;
+				} 
+				if (halfIndex > index && treeNode.id.errCode != -1) {
+					childNode = +(id === treeNode.id);
+				} else {
+					childNode = 1;
+				}
+			}
+			treeNodeInt |= childNode << i;
+			treeNode = treeNode.children[childNode];
+			// everyLoop(index, treeNodeInt, totalReq);
+		}
+		blockEnd = treeNodeInt;
+		//console.log(treeNodeInt)
+		let duration = blockEnd - index + 1;
+		let pageText = await getOldPageJSON(id);
+		let dateArray = [];
+		for (let i = 0; i < duration; i++) {
+			dateArray.push(new Date(start + interval * (index + i)));
+		}
+		pages.push({page: pageText, id: id, date: dateArray, count: duration});
+		totalReq++;
+		index += duration;
+		date += interval * duration;
+		everyLoop(index, treeNodeInt, totalReq);
+	}
+}
+
 // Render HTML pages returned by Wikipedia
-async function renderPages(i, delay, callback) {
+async function renderPages(i, delay, callback, span, totalIter) {
+	let newSpan;
 	if (i >= pages.length) {
 		setTimeout(renderPages, delay, i, delay, callback);
 	} else {
-		elementContent.innerHTML = pages[i].page;
-		elementFrame.innerHTML = `${i + 1} / ${revTotal}`;
-		elementTime.innerHTML = pages[i].date.toDateString();
-	
-		console.log("Rendering " + i);
-		i++;
-		if (i != revTotal) {
-			setTimeout(renderPages, delay, i, delay, callback);
+		if (totalIter === 0) {
+			elementContent.innerHTML = pages[i].page;
+		}
+
+		// Handle span logic, handle callback logic
+		if (span !== pages[i].count) {
+			newSpan = span + 1;
+		} else if (totalIter !== revTotal) {
+			i++;
+			newSpan = 1;
+			span = 0;
+			elementContent.innerHTML = pages[i].page; // Prevent running block of code at end
 		} else {
 			callback();
+			return;
 		}
+
+		console.log("Rendering " + i);
+		elementTime.innerHTML = pages[i].date[span].toDateString();
+		elementFrame.innerHTML = `${totalIter + 1} / ${revTotal}`;
+		totalIter++;
+		setTimeout(renderPages, delay, i, delay, callback, newSpan, totalIter);
 	}
 }
 
@@ -142,13 +260,18 @@ function animationFinish() {
 }
 
 // Render counters while processing
-async function renderCount(pageIndex, date) {
+async function renderCountLinear(pageIndex, date) {
 	elementProcessed.innerHTML = `${pageIndex + 1} / ${revTotal}`;
+}
+
+async function renderCountTree(index, treeNodeInt, totalReq) {
+	elementProcessed.innerHTML = `${index} / ${revTotal} path: ${zeroFill(treeNodeInt, treeDepth, 2)} total reqs: ${totalReq}`;
 }
 
 // Base settings submit
 elementBaseForm.onsubmit = () => {
 	try {
+		pages = [];
 		elementAnimFormSubmit.setAttribute("disabled", "");
 		elementBaseFormSubmit.setAttribute("disabled", "");
 		let formData = new FormData(elementBaseForm);
@@ -168,21 +291,41 @@ elementBaseForm.onsubmit = () => {
 				callbackFrame += 1; // To align with callbackFrame mode bounds
 			} 
 		}
-		getPagesRange(
-			formData.get("page"),
-			Date.parse(formData.get("start")),
-			Date.parse(formData.get("end")),
-			formData.get("interval") * 1000,
-			callbackFrame,
-			async () => {
-				elementAnimFormSubmit.removeAttribute("disabled");
-			},
-			renderCount
-		).then(() => {
-			if (!animationPlaying) {
-				elementBaseFormSubmit.removeAttribute("disabled");
-			}
-		});
+		let start = Date.parse(formData.get("start"));
+		let end = Date.parse(formData.get("end"));
+		let interval = formData.get("interval") * 1000;
+		let page = formData.get("page");
+		switch (formData.get("fetchMethod")) {
+			case "linear":
+				getRangeLinear(
+					page,
+					start,
+					end,
+					interval,
+					callbackFrame,
+					async () => {
+						elementAnimFormSubmit.removeAttribute("disabled");
+					},
+					renderCountLinear
+				).then(() => {
+					if (!animationPlaying) {
+						elementBaseFormSubmit.removeAttribute("disabled");
+					}
+				});
+				break;
+			case "tree":
+				getRangeTree(
+					page,
+					start,
+					end,
+					interval, 
+					renderCountTree
+				).then(() => {
+					elementBaseFormSubmit.removeAttribute("disabled");
+					elementAnimFormSubmit.removeAttribute("disabled");
+				});
+				break;
+	}
 	} catch(e) {
 		console.log(e);
 	}
@@ -196,7 +339,7 @@ elementAnimForm.onsubmit = () => {
 		elementBaseFormSubmit.setAttribute("disabled", "");
 		elementAnimClear.setAttribute("disabled", "");
 		animationPlaying = true;
-		renderPages(0, elementAnimDelay.value, animationFinish);
+		renderPages(0, elementAnimDelay.value, animationFinish, 0, 0);
 	} catch(e) {
 		console.log(e);
 	}
@@ -215,22 +358,25 @@ elementAnimClear.onclick = () => {
 	elementTime.innerHTML = "";
 }
 
+elementFetchInput.onchange = () => {
+	if (elementFetchInput.value !== "linear") {
+		elementCBModeInput.setAttribute("disabled", "");
+		elementCBFrameInput.setAttribute("disabled", "");
+	} else {
+		elementCBModeInput.removeAttribute("disabled");
+		elementCBFrameInput.removeAttribute("disabled");
+	}
+}
 
 // Test function 
 
-// function test() {
-	
-// 	getPagesRange(
-// 		"Breaking_Bad", 
-// 		Date.parse("2008-1-01"), 
-// 		Date.parse("2015-1-01"), 
-// 		(86400 * 30) * 1000,
-// 		0.8,
-// 		async () => {
-// 			renderPages(0, animationFinish) // For readable and (somewhat) portable code
-// 		},
-// 		renderCount
-// 	)
-	
-// }
+function test() {
+	getRangeTree(
+		"UVB-76",
+		Date.parse("2005-1-1"),
+		Date.parse("2022-1-1"),
+		86400 * 1000,
+		renderCountTree
+	)
+}
 

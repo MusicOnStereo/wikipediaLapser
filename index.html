@@ -12,6 +12,7 @@
 	<link rel="stylesheet" href="wpCSS2.css" />
 </head>
 <body>
+	<!-- <button onclick="test()">Test</button> -->
 	<h1>Wikipedia Lapser</h1>
 	<p>Wikipedia revision timelapse visualizer</p>
 	<div id="settingsDiv">
@@ -20,12 +21,16 @@
 			Page: <input type="text" name="page" required/><br>
 			Between: <input type="date" name="start" required/> - <input type="date" name="end" required/><br>
 			Interval (seconds): <input type="number" name="interval" min="0" required /><br>
-			Allow animation play at <select name="callbackMode">
+			Allow animation play at <select name="callbackMode" id="callbackMode">
 				<option value="to">x downloaded frames to completion</option>
 				<option value="from">x frames downloaded</option>
 				<option value="perc" selected>x% done</option>
 			</select>:
-			<input type="number" name="callbackFrame" value="85" min="0" required><br>
+			<input type="number" id="callbackFrame" name="callbackFrame" value="85" min="0" required><br>
+			Method: <select name="fetchMethod" id="fetchMethod">
+				<option value="linear">Chronological</option>
+				<option value="tree">Binary Tree</option>
+			</select><br>
 			<button type="submit" id="baseFormSubmit">Download</button>
 		</form>
 		<form id="animForm">
